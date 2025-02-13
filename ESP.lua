@@ -14,12 +14,11 @@ local V2New = Vector2.new
 local V3New = Vector3.new
 local WTVP = Camera.WorldToViewportPoint
 local FindFirstChild = game.FindFirstChild
-local WorldToViewportPoint = Camera.WorldToViewportPoint
 
 -- ESP Objects Container
 local ESPObjects = {}
 
--- Settings (will be updated from UI)
+-- Settings
 local Settings = {
     Enabled = false,
     Boxes = false,
@@ -48,7 +47,10 @@ end
 
 local function IsTeammate(player)
     if not Settings.TeamCheck then return false end
-    return player.Team and player.Team == LocalPlayer.Team
+    if player.Team and LocalPlayer.Team then
+        return player.Team == LocalPlayer.Team
+    end
+    return false
 end
 
 local function GetPlayerTool(player)
@@ -145,41 +147,57 @@ function ESPObject:Update()
         return
     end
     
-    if not self.Player or not IsAlive(self.Player) or self.Player == LocalPlayer or IsTeammate(self.Player) then
+    local player = self.Player
+    if not player or not IsAlive(player) or player == LocalPlayer then
         self:Hide()
         return
     end
     
-    local character = self.Player.Character
-    local cframe = character:GetPivot()
-    local position, visible = WTVP(Camera, cframe.Position)
-    
-    if not visible then
+    if Settings.TeamCheck and IsTeammate(player) then
         self:Hide()
         return
     end
     
+    local character = player.Character
+    if not character then
+        self:Hide()
+        return
+    end
+    
+    local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
     local humanoid = character:FindFirstChild("Humanoid")
-    local rootPart = character:FindFirstChild("HumanoidRootPart")
+    local head = character:FindFirstChild("Head")
     
-    if not humanoid or not rootPart then
+    if not humanoidRootPart or not humanoid or not head then
         self:Hide()
         return
     end
     
-    -- Calculate Box
-    local size = character:GetExtentsSize()
-    local width = math.floor(size.X * 1000)
-    local height = math.floor(size.Y * 500)
+    local rootPos = humanoidRootPart.Position
+    local headPos = head.Position
+    
+    local rootPoint, rootVisible = WTVP(Camera, rootPos)
+    local headPoint, headVisible = WTVP(Camera, headPos)
+    
+    if not rootVisible and not headVisible then
+        self:Hide()
+        return
+    end
+    
+    local screenRootPos = V2New(rootPoint.X, rootPoint.Y)
+    local screenHeadPos = V2New(headPoint.X, headPoint.Y)
+    
+    local boxHeight = math.abs(screenRootPos.Y - screenHeadPos.Y)
+    local boxWidth = boxHeight * 0.6
     
     -- Update Box
     if Settings.Boxes then
-        self.Drawings.BoxOutline.Size = V2New(width, height)
-        self.Drawings.BoxOutline.Position = V2New(position.X - width / 2, position.Y - height / 2)
+        self.Drawings.BoxOutline.Size = V2New(boxWidth, boxHeight)
+        self.Drawings.BoxOutline.Position = V2New(screenHeadPos.X - boxWidth / 2, screenHeadPos.Y)
         self.Drawings.BoxOutline.Visible = true
         
-        self.Drawings.Box.Size = V2New(width, height)
-        self.Drawings.Box.Position = V2New(position.X - width / 2, position.Y - height / 2)
+        self.Drawings.Box.Size = V2New(boxWidth, boxHeight)
+        self.Drawings.Box.Position = V2New(screenHeadPos.X - boxWidth / 2, screenHeadPos.Y)
         self.Drawings.Box.Visible = true
     else
         self.Drawings.Box.Visible = false
@@ -192,12 +210,12 @@ function ESPObject:Update()
         local maxHealth = humanoid.MaxHealth
         local healthPercent = health / maxHealth
         
-        self.Drawings.HealthBarOutline.Size = V2New(3, height)
-        self.Drawings.HealthBarOutline.Position = V2New(position.X - width / 2 - 6, position.Y - height / 2)
+        self.Drawings.HealthBarOutline.Size = V2New(4, boxHeight)
+        self.Drawings.HealthBarOutline.Position = V2New(screenHeadPos.X - boxWidth / 2 - 6, screenHeadPos.Y)
         self.Drawings.HealthBarOutline.Visible = true
         
-        self.Drawings.HealthBar.Size = V2New(1, height * healthPercent)
-        self.Drawings.HealthBar.Position = V2New(position.X - width / 2 - 5, position.Y - height / 2 + height * (1 - healthPercent))
+        self.Drawings.HealthBar.Size = V2New(2, boxHeight * healthPercent)
+        self.Drawings.HealthBar.Position = V2New(screenHeadPos.X - boxWidth / 2 - 5, screenHeadPos.Y + boxHeight * (1 - healthPercent))
         self.Drawings.HealthBar.Color = Color3.fromHSV(healthPercent / 3, 1, 1)
         self.Drawings.HealthBar.Visible = true
     else
@@ -208,7 +226,7 @@ function ESPObject:Update()
     -- Update Tracer
     if Settings.Tracers then
         self.Drawings.Tracer.From = V2New(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
-        self.Drawings.Tracer.To = V2New(position.X, position.Y)
+        self.Drawings.Tracer.To = screenRootPos
         self.Drawings.Tracer.Visible = true
     else
         self.Drawings.Tracer.Visible = false
@@ -216,9 +234,9 @@ function ESPObject:Update()
     
     -- Update Name
     if Settings.Names or Settings.DisplayNames then
-        local text = Settings.DisplayNames and self.Player.DisplayName or self.Player.Name
+        local text = Settings.DisplayNames and player.DisplayName or player.Name
         self.Drawings.Name.Text = text
-        self.Drawings.Name.Position = V2New(position.X, position.Y - height / 2 - 15 + Settings.TextOffset)
+        self.Drawings.Name.Position = V2New(screenHeadPos.X, screenHeadPos.Y - 25 + Settings.TextOffset)
         self.Drawings.Name.Color = Settings.TextColor
         self.Drawings.Name.Transparency = 1 - Settings.TextTransparency
         self.Drawings.Name.Visible = true
@@ -228,9 +246,9 @@ function ESPObject:Update()
     
     -- Update Distance
     if Settings.Distance then
-        local distance = math.floor((Camera.CFrame.Position - rootPart.Position).Magnitude)
+        local distance = math.floor((Camera.CFrame.Position - rootPos).Magnitude)
         self.Drawings.Distance.Text = tostring(distance) .. " studs"
-        self.Drawings.Distance.Position = V2New(position.X, position.Y + height / 2 + 5 + Settings.TextOffset)
+        self.Drawings.Distance.Position = V2New(screenRootPos.X, screenRootPos.Y + 5 + Settings.TextOffset)
         self.Drawings.Distance.Color = Settings.TextColor
         self.Drawings.Distance.Transparency = 1 - Settings.TextTransparency
         self.Drawings.Distance.Visible = true
@@ -240,9 +258,9 @@ function ESPObject:Update()
     
     -- Update Tool
     if Settings.Tools then
-        local tool = GetPlayerTool(self.Player)
+        local tool = GetPlayerTool(player)
         self.Drawings.Tool.Text = tool
-        self.Drawings.Tool.Position = V2New(position.X, position.Y + height / 2 + 20 + Settings.TextOffset)
+        self.Drawings.Tool.Position = V2New(screenRootPos.X, screenRootPos.Y + 20 + Settings.TextOffset)
         self.Drawings.Tool.Color = Settings.TextColor
         self.Drawings.Tool.Transparency = 1 - Settings.TextTransparency
         self.Drawings.Tool.Visible = true
@@ -279,12 +297,10 @@ end
 
 -- Main ESP Functions
 function ESP:Init()
-    -- Player Added
     Players.PlayerAdded:Connect(function(player)
         ESPObjects[player] = ESPObject.new(player)
     end)
     
-    -- Player Removing
     Players.PlayerRemoving:Connect(function(player)
         local object = ESPObjects[player]
         if object then
@@ -293,14 +309,12 @@ function ESP:Init()
         end
     end)
     
-    -- Initialize existing players
     for _, player in ipairs(Players:GetPlayers()) do
         if player ~= LocalPlayer then
             ESPObjects[player] = ESPObject.new(player)
         end
     end
     
-    -- Update ESP
     RunService.RenderStepped:Connect(function()
         for _, object in pairs(ESPObjects) do
             object:Update()
@@ -308,14 +322,12 @@ function ESP:Init()
     end)
 end
 
--- Settings Update Functions
 function ESP:UpdateSettings(newSettings)
     for key, value in pairs(newSettings) do
         Settings[key] = value
     end
 end
 
--- Initialize ESP
 ESP:Init()
 
 return ESP
